@@ -4,23 +4,28 @@ import com.zycus.stockpulse.dto.PricingSuggestionDTO;
 import com.zycus.stockpulse.dto.ReorderSuggestionDTO;
 import com.zycus.stockpulse.dto.UpdateSuggestionRequest;
 import com.zycus.stockpulse.entity.*;
+import com.zycus.stockpulse.service.AdvisorRegistry;
 import com.zycus.stockpulse.service.SuggestionService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @RestController
-@RequestMapping("/api")
 @CrossOrigin(origins = "*")
 public class SuggestionController {
     
     @Autowired
     private SuggestionService suggestionService;
     
-    @PostMapping("/products/{id}/suggest-pricing")
+    @Autowired
+    private AdvisorRegistry advisorRegistry;
+    
+    // On-demand pricing suggestion endpoints
+    @PostMapping({"/api/products/{id}/suggest-pricing", "/products/{id}/suggest-pricing"})
     public ResponseEntity<PricingSuggestionDTO> createPricingSuggestion(
             @PathVariable Long id,
             @RequestParam(defaultValue = "MANUAL") TriggerReason triggerReason) {
@@ -32,7 +37,8 @@ public class SuggestionController {
         return ResponseEntity.notFound().build();
     }
     
-    @PostMapping("/products/{id}/suggest-reorder")
+    // On-demand reorder suggestion endpoints
+    @PostMapping({"/api/products/{id}/suggest-reorder", "/products/{id}/suggest-reorder"})
     public ResponseEntity<ReorderSuggestionDTO> createReorderSuggestion(
             @PathVariable Long id,
             @RequestParam(defaultValue = "MANUAL") TriggerReason triggerReason) {
@@ -44,52 +50,72 @@ public class SuggestionController {
         return ResponseEntity.notFound().build();
     }
     
-    @PatchMapping("/pricing-suggestions/{id}")
+    // Suggestion review & decision endpoints
+    @PatchMapping({"/api/pricing-suggestions/{id}", "/pricing-suggestions/{id}"})
     public ResponseEntity<PricingSuggestionDTO> updatePricingSuggestion(
             @PathVariable Long id,
             @RequestBody UpdateSuggestionRequest request) {
         
-        PricingSuggestion updatedSuggestion = suggestionService.updatePricingSuggestionStatus(id, request.getStatus());
-        if (updatedSuggestion != null) {
-            return ResponseEntity.ok(convertToDTO(updatedSuggestion));
+        PricingSuggestion updated = suggestionService.updatePricingSuggestionStatus(id, request.getStatus());
+        if (updated != null) {
+            return ResponseEntity.ok(convertToDTO(updated));
         }
         return ResponseEntity.notFound().build();
     }
     
-    @PatchMapping("/reorder-suggestions/{id}")
+    @PatchMapping({"/api/reorder-suggestions/{id}", "/reorder-suggestions/{id}"})
     public ResponseEntity<ReorderSuggestionDTO> updateReorderSuggestion(
             @PathVariable Long id,
             @RequestBody UpdateSuggestionRequest request) {
         
-        ReorderSuggestion updatedSuggestion = suggestionService.updateReorderSuggestionStatus(id, request.getStatus());
-        if (updatedSuggestion != null) {
-            return ResponseEntity.ok(convertToDTO(updatedSuggestion));
+        ReorderSuggestion updated = suggestionService.updateReorderSuggestionStatus(id, request.getStatus());
+        if (updated != null) {
+            return ResponseEntity.ok(convertToDTO(updated));
         }
         return ResponseEntity.notFound().build();
     }
     
-    @GetMapping("/pricing-suggestions")
+    // List suggestions
+    @GetMapping({"/api/pricing-suggestions", "/pricing-suggestions"})
     public ResponseEntity<List<PricingSuggestionDTO>> getPricingSuggestions(
             @RequestParam(defaultValue = "PENDING") SuggestionStatus status) {
         
         List<PricingSuggestion> suggestions = suggestionService.getPricingSuggestionsByStatus(status);
-        List<PricingSuggestionDTO> suggestionDTOs = suggestions.stream()
+        List<PricingSuggestionDTO> dtos = suggestions.stream()
                 .map(this::convertToDTO)
                 .collect(Collectors.toList());
         
-        return ResponseEntity.ok(suggestionDTOs);
+        return ResponseEntity.ok(dtos);
     }
     
-    @GetMapping("/reorder-suggestions")
+    @GetMapping({"/api/reorder-suggestions", "/reorder-suggestions"})
     public ResponseEntity<List<ReorderSuggestionDTO>> getReorderSuggestions(
             @RequestParam(defaultValue = "PENDING") SuggestionStatus status) {
         
         List<ReorderSuggestion> suggestions = suggestionService.getReorderSuggestionsByStatus(status);
-        List<ReorderSuggestionDTO> suggestionDTOs = suggestions.stream()
+        List<ReorderSuggestionDTO> dtos = suggestions.stream()
                 .map(this::convertToDTO)
                 .collect(Collectors.toList());
         
-        return ResponseEntity.ok(suggestionDTOs);
+        return ResponseEntity.ok(dtos);
+    }
+    
+    // Strategy runtime switching endpoints
+    @GetMapping({"/api/commerce/strategy", "/commerce/strategy"})
+    public ResponseEntity<Map<String, Object>> getCommerceStrategy() {
+        return ResponseEntity.ok(Map.of(
+            "activeStrategy", advisorRegistry.getCurrentStrategy(),
+            "availableStrategies", advisorRegistry.getAvailableStrategies()
+        ));
+    }
+    
+    @PostMapping({"/api/commerce/strategy", "/commerce/strategy"})
+    public ResponseEntity<Map<String, Object>> setCommerceStrategy(@RequestParam String strategy) {
+        advisorRegistry.setActiveAdvisor(strategy);
+        return ResponseEntity.ok(Map.of(
+            "status", "success",
+            "activeStrategy", advisorRegistry.getCurrentStrategy()
+        ));
     }
     
     private PricingSuggestionDTO convertToDTO(PricingSuggestion suggestion) {

@@ -83,3 +83,13 @@ logs
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Secrets, Credentials, and Local Configs
+*.secret
+secret.properties
+*-secret.properties
+application-secret.properties
+application-local.properties
+.env
+.env.*
+!.env.example

@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zycus.stockpulse.entity.*;
 import com.zycus.stockpulse.repository.ProductRepository;
 import com.zycus.stockpulse.service.ai.LlmGateway;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -14,29 +16,42 @@ import java.math.RoundingMode;
 @Service
 public class AICommerceAdvisor implements CommerceAdvisor {
     
+    private static final Logger log = LoggerFactory.getLogger(AICommerceAdvisor.class);
+    
     @Autowired
     private LlmGateway llmGateway;
     
     @Autowired
     private ProductRepository productRepository;
     
+    @Autowired
+    private RuleBasedCommerceAdvisor fallbackAdvisor;
+    
     private final ObjectMapper objectMapper = new ObjectMapper();
     
     @Override
-    public PricingSuggestion generatePricingSuggestion(Product product) {
-        // Try to get AI recommendation
+    public String getStrategyName() {
+        return "ai";
+    }
+    
+    @Override
+    public PricingSuggestion generatePricingSuggestion(Product product, TriggerReason triggerReason) {
         try {
-            String prompt = createPricingPrompt(product);
-            JsonNode aiResponse = llmGateway.callLlm(prompt);
+            Double categoryAvg = productRepository != null 
+                    ? productRepository.findAverageDemandVelocityByCategory(product.getCategory()) 
+                    : 0.0;
+            if (categoryAvg == null) categoryAvg = 0.0;
             
-            if (aiResponse != null && !aiResponse.asText().isEmpty()) {
-                JsonNode parsedResponse = objectMapper.readTree(aiResponse.asText());
+            String prompt = buildPricingPrompt(product, triggerReason, categoryAvg);
+            String rawJson = llmGateway.callLlmRaw(prompt);
+            
+            if (rawJson != null && !rawJson.isBlank()) {
+                JsonNode root = objectMapper.readTree(cleanJsonString(rawJson));
                 
-                // Extract values with validation
-                BigDecimal recommendedPrice = parseBigDecimal(parsedResponse, "recommendedPrice", product.getCurrentPrice());
-                PriceDirection direction = parsePriceDirection(parsedResponse, "direction");
-                Double confidence = parseDouble(parsedResponse, "pricingConfidence", 0.8);
-                String reasoning = parseString(parsedResponse, "pricingReasoning", "AI-generated pricing recommendation");
+                BigDecimal recommendedPrice = parsePrice(root, product.getCurrentPrice());
+                PriceDirection direction = parseDirection(root, recommendedPrice, product.getCurrentPrice());
+                Double confidence = parseConfidence(root);
+                String reasoning = parseReasoning(root, "AI Commerce Advisor: Dynamic pricing recommendation generated based on inventory and velocity analysis.");
                 
                 return new PricingSuggestion(
                     product,
@@ -45,192 +60,205 @@ public class AICommerceAdvisor implements CommerceAdvisor {
                     direction,
                     confidence,
                     reasoning,
-                    TriggerReason.MANUAL
+                    triggerReason
                 );
             }
         } catch (Exception e) {
-            System.err.println("Error processing AI pricing suggestion: " + e.getMessage());
+            log.warn("AI pricing recommendation generation failed: {}. Falling back to rule-based advisor.", e.getMessage());
         }
         
-        // Fallback to rule-based
-        return new RuleBasedCommerceAdvisor().generatePricingSuggestion(product);
+        // Resilient fallback
+        return fallbackAdvisor.generatePricingSuggestion(product, triggerReason);
     }
     
     @Override
-    public ReorderSuggestion generateReorderSuggestion(Product product) {
-        // Try to get AI recommendation
+    public ReorderSuggestion generateReorderSuggestion(Product product, TriggerReason triggerReason) {
         try {
-            String prompt = createReorderPrompt(product);
-            JsonNode aiResponse = llmGateway.callLlm(prompt);
+            Double categoryAvg = productRepository != null 
+                    ? productRepository.findAverageDemandVelocityByCategory(product.getCategory()) 
+                    : 0.0;
+            if (categoryAvg == null) categoryAvg = 0.0;
             
-            if (aiResponse != null && !aiResponse.asText().isEmpty()) {
-                JsonNode parsedResponse = objectMapper.readTree(aiResponse.asText());
+            String prompt = buildReorderPrompt(product, triggerReason, categoryAvg);
+            String rawJson = llmGateway.callLlmRaw(prompt);
+            
+            if (rawJson != null && !rawJson.isBlank()) {
+                JsonNode root = objectMapper.readTree(cleanJsonString(rawJson));
                 
-                // Extract values with validation
-                Integer recommendedQuantity = parseInteger(parsedResponse, "recommendedQuantity", 10);
-                Double confidence = parseDouble(parsedResponse, "reorderConfidence", 0.8);
-                String reasoning = parseString(parsedResponse, "reorderReasoning", "AI-generated reorder recommendation");
-                Integer leadTime = parseInteger(parsedResponse, "suggestedLeadTime", 7);
+                Integer quantity = parseQuantity(root, product.getReorderThreshold(), product.getStockLevel());
+                Integer leadTime = parseLeadTime(root);
+                Double confidence = parseConfidence(root);
+                String reasoning = parseReasoning(root, "AI Commerce Advisor: Automated replenishment suggestion based on supply velocity.");
                 
                 return new ReorderSuggestion(
                     product,
                     product.getStockLevel(),
-                    recommendedQuantity,
+                    quantity,
                     leadTime,
                     confidence,
                     reasoning,
-                    TriggerReason.MANUAL
+                    triggerReason
                 );
             }
         } catch (Exception e) {
-            System.err.println("Error processing AI reorder suggestion: " + e.getMessage());
+            log.warn("AI reorder recommendation generation failed: {}. Falling back to rule-based advisor.", e.getMessage());
         }
         
-        // Fallback to rule-based
-        return new RuleBasedCommerceAdvisor().generateReorderSuggestion(product);
-    }
-    private String createPricingPrompt(Product product) {
-        Double categoryAvgVelocity = productRepository.findAverageDemandVelocityByCategory(product.getCategory());
-        if (categoryAvgVelocity == null) categoryAvgVelocity = 0.0;
-        
-        return String.format("""
-            You are an AI commerce advisor for an online retail store. Analyze the following product and provide pricing recommendations.
-            
-            Product Information:
-            - SKU: %s
-            - Name: %s
-            - Category: %s
-            - Current Price: $%.2f
-            - Stock Level: %d
-            - Reorder Threshold: %d
-            - Demand Velocity: %d orders/day
-            - Category Average Velocity: %.1f orders/day
-            
-            Based on this information, provide a JSON response with the following structure:
-            {
-                "recommendedPrice": number,
-                "direction": "INCREASE|DECREASE|HOLD",
-                "pricingConfidence": number (0-1),
-                "pricingReasoning": "plain English explanation"
-            }
-            
-            Consider factors like stock scarcity, demand trends, competitive positioning, and profit margins.
-            Keep price changes reasonable (typically 5-15%%).
-            """, 
-            product.getSku(),
-            product.getName(),
-            product.getCategory(),
-            product.getCurrentPrice(),
-            product.getStockLevel(),
-            product.getReorderThreshold(),
-            product.getDemandVelocity(),
-            categoryAvgVelocity
-        );
+        // Resilient fallback
+        return fallbackAdvisor.generateReorderSuggestion(product, triggerReason);
     }
     
-    private String createReorderPrompt(Product product) {
-        return String.format("""
-            You are an AI commerce advisor for an online retail store. Analyze the following product and provide reorder recommendations.
-            
-            Product Information:
-            - SKU: %s
-            - Name: %s
-            - Category: %s
-            - Current Stock: %d
-            - Reorder Threshold: %d
-            - Demand Velocity: %d orders/day
-            
-            Based on this information, provide a JSON response with the following structure:
-            {
-                "recommendedQuantity": integer,
-                "reorderConfidence": number (0-1),
-                "reorderReasoning": "plain English explanation",
-                "suggestedLeadTime": integer (days)
-            }
-            
-            Consider factors like current stock, demand rate, seasonal trends, supplier reliability, and storage costs.
-            Ensure recommended quantities are realistic and economically sensible.
-            """, 
-            product.getSku(),
-            product.getName(),
-            product.getCategory(),
-            product.getStockLevel(),
-            product.getReorderThreshold(),
-            product.getDemandVelocity()
-        );
+    private String cleanJsonString(String raw) {
+        String clean = raw.trim();
+        if (clean.startsWith("```json")) {
+            clean = clean.substring(7);
+        } else if (clean.startsWith("```")) {
+            clean = clean.substring(3);
+        }
+        if (clean.endsWith("```")) {
+            clean = clean.substring(0, clean.length() - 3);
+        }
+        return clean.trim();
     }
     
-    // Helper methods for parsing with validation
-    private BigDecimal parseBigDecimal(JsonNode node, String field, BigDecimal defaultValue) {
+    private String buildPricingPrompt(Product product, TriggerReason triggerReason, double categoryAvg) {
+        if (triggerReason == TriggerReason.INVENTORY_LOW) {
+            return String.format("""
+                You are ShopStream's AI Commerce Advisor evaluating an INVENTORY LOW trigger.
+                Merchandising context:
+                - Stock has dropped to %d units (at or below reorder threshold of %d).
+                - Current Price: $%.2f. Demand Velocity: %d orders/day (Category '%s' average: %.1f orders/day).
+                - Decision Dilemma: Decide whether to RAISE the price (5%%-20%%) to protect scarce inventory and slow stockout before restock arrives, or HOLD/DISCOUNT if velocity is stalled.
+                
+                Return JSON format:
+                {
+                  "recommendedPrice": 29.99,
+                  "direction": "INCREASE" | "DECREASE" | "HOLD",
+                  "confidence": 0.85,
+                  "reasoning": "Clear explanation of the inventory protection rationale"
+                }
+                """, product.getStockLevel(), product.getReorderThreshold(), product.getCurrentPrice(),
+                product.getDemandVelocity(), product.getCategory().name(), categoryAvg);
+        } else if (triggerReason == TriggerReason.DEMAND_SPIKE) {
+            return String.format("""
+                You are ShopStream's AI Commerce Advisor evaluating a DEMAND SPIKE trigger.
+                Merchandising context:
+                - Product '%s' (%s) is experiencing viral demand with %d orders/day (Category peer average is %.1f/day).
+                - Current Price: $%.2f. Current Stock: %d units (Reorder threshold: %d).
+                - Decision Dilemma: Recommend a strategic price increase (e.g. 5%%-15%%) to capture consumer surplus without dampening conversion momentum.
+                
+                Return JSON format:
+                {
+                  "recommendedPrice": 29.99,
+                  "direction": "INCREASE" | "HOLD",
+                  "confidence": 0.90,
+                  "reasoning": "Clear explanation of the surge capitalization rationale"
+                }
+                """, product.getName(), product.getCategory().name(), product.getDemandVelocity(),
+                categoryAvg, product.getCurrentPrice(), product.getStockLevel(), product.getReorderThreshold());
+        } else {
+            return String.format("""
+                You are ShopStream's AI Commerce Advisor performing an on-demand pricing evaluation.
+                Product Details:
+                - SKU: %s, Name: %s, Category: %s
+                - Current Price: $%.2f, Stock: %d, Reorder Threshold: %d, Demand: %d/day (Category avg: %.1f/day)
+                
+                Return JSON format:
+                {
+                  "recommendedPrice": 29.99,
+                  "direction": "INCREASE" | "DECREASE" | "HOLD",
+                  "confidence": 0.82,
+                  "reasoning": "Concise reasoning for merchandising approval"
+                }
+                """, product.getSku(), product.getName(), product.getCategory().name(),
+                product.getCurrentPrice(), product.getStockLevel(), product.getReorderThreshold(),
+                product.getDemandVelocity(), categoryAvg);
+        }
+    }
+    
+    private String buildReorderPrompt(Product product, TriggerReason triggerReason, double categoryAvg) {
+        return String.format("""
+            You are ShopStream's AI Replenishment Advisor.
+            Context: Product '%s' (%s), Current Stock: %d units, Reorder Threshold: %d, Demand Velocity: %d orders/day.
+            Trigger Reason: %s. Category average velocity: %.1f/day.
+            
+            Recommend an optimal batch replenishment quantity and estimated supplier lead time in days.
+            Return JSON format:
+            {
+              "recommendedQuantity": 50,
+              "suggestedLeadTime": 7,
+              "confidence": 0.88,
+              "reasoning": "Clear supply chain rationale explaining buffer calculation"
+            }
+            """, product.getName(), product.getCategory().name(), product.getStockLevel(),
+            product.getReorderThreshold(), product.getDemandVelocity(), triggerReason.name(), categoryAvg);
+    }
+    
+    // Bounds Validation & Parsers
+    private BigDecimal parsePrice(JsonNode root, BigDecimal fallback) {
         try {
-            JsonNode valueNode = node.get(field);
-            if (valueNode != null && !valueNode.isNull()) {
-                BigDecimal value = new BigDecimal(valueNode.asText());
-                if (value.compareTo(BigDecimal.ZERO) > 0 && value.compareTo(new BigDecimal("10000")) < 0) {
-                    return value.setScale(2, RoundingMode.HALF_UP);
+            if (root.has("recommendedPrice") && !root.get("recommendedPrice").isNull()) {
+                BigDecimal p = new BigDecimal(root.get("recommendedPrice").asText());
+                // Sanity check: must be positive and between 0.2x and 4x of current price
+                if (p.compareTo(BigDecimal.ZERO) > 0 && 
+                    p.compareTo(fallback.multiply(new BigDecimal("0.2"))) >= 0 &&
+                    p.compareTo(fallback.multiply(new BigDecimal("4.0"))) <= 0) {
+                    return p.setScale(2, RoundingMode.HALF_UP);
                 }
             }
-        } catch (Exception e) {
-            // Fall through to default
-        }
-        return defaultValue;
+        } catch (Exception ignored) {}
+        return fallback;
     }
     
-    private PriceDirection parsePriceDirection(JsonNode node, String field) {
+    private PriceDirection parseDirection(JsonNode root, BigDecimal recommendedPrice, BigDecimal currentPrice) {
         try {
-            JsonNode valueNode = node.get(field);
-            if (valueNode != null && !valueNode.isNull()) {
-                return PriceDirection.valueOf(valueNode.asText().toUpperCase());
+            if (root.has("direction")) {
+                return PriceDirection.valueOf(root.get("direction").asText().toUpperCase());
             }
-        } catch (Exception e) {
-            // Fall through to default
-        }
+        } catch (Exception ignored) {}
+        
+        int cmp = recommendedPrice.compareTo(currentPrice);
+        if (cmp > 0) return PriceDirection.INCREASE;
+        if (cmp < 0) return PriceDirection.DECREASE;
         return PriceDirection.HOLD;
     }
     
-    private Double parseDouble(JsonNode node, String field, Double defaultValue) {
+    private Double parseConfidence(JsonNode root) {
         try {
-            JsonNode valueNode = node.get(field);
-            if (valueNode != null && !valueNode.isNull()) {
-                Double value = valueNode.asDouble();
-                if (value >= 0.0 && value <= 1.0) {
-                    return value;
-                }
+            if (root.has("confidence")) {
+                double c = root.get("confidence").asDouble();
+                if (c >= 0.0 && c <= 1.0) return c;
             }
-        } catch (Exception e) {
-            // Fall through to default
-        }
-        return defaultValue;
+        } catch (Exception ignored) {}
+        return 0.85;
     }
     
-    private String parseString(JsonNode node, String field, String defaultValue) {
+    private String parseReasoning(JsonNode root, String defaultReason) {
         try {
-            JsonNode valueNode = node.get(field);
-            if (valueNode != null && !valueNode.isNull()) {
-                String value = valueNode.asText();
-                if (value != null && !value.trim().isEmpty()) {
-                    return value.trim();
-                }
+            if (root.has("reasoning") && !root.get("reasoning").asText().isBlank()) {
+                return root.get("reasoning").asText().trim();
             }
-        } catch (Exception e) {
-            // Fall through to default
-        }
-        return defaultValue;
+        } catch (Exception ignored) {}
+        return defaultReason;
     }
     
-    private Integer parseInteger(JsonNode node, String field, Integer defaultValue) {
+    private Integer parseQuantity(JsonNode root, int threshold, int currentStock) {
         try {
-            JsonNode valueNode = node.get(field);
-            if (valueNode != null && !valueNode.isNull()) {
-                Integer value = valueNode.asInt();
-                if (value > 0 && value < 10000) {
-                    return value;
-                }
+            if (root.has("recommendedQuantity")) {
+                int q = root.get("recommendedQuantity").asInt();
+                if (q > 0 && q < 50000) return q;
             }
-        } catch (Exception e) {
-            // Fall through to default
-        }
-        return defaultValue;
+        } catch (Exception ignored) {}
+        return Math.max(1, (threshold * 3) - currentStock);
     }
-}
+    
+    private Integer parseLeadTime(JsonNode root) {
+        try {
+            if (root.has("suggestedLeadTime")) {
+                int lt = root.get("suggestedLeadTime").asInt();
+                if (lt >= 1 && lt <= 90) return lt;
+            }
+        } catch (Exception ignored) {}
+        return 7;
+    }
 }

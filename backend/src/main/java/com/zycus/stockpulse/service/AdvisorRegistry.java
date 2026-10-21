@@ -1,18 +1,24 @@
 package com.zycus.stockpulse.service;
 
-import com.zycus.stockpulse.config.LlmConfig;
-import com.zycus.stockpulse.entity.Product;
 import com.zycus.stockpulse.entity.PricingSuggestion;
+import com.zycus.stockpulse.entity.Product;
 import com.zycus.stockpulse.entity.ReorderSuggestion;
+import com.zycus.stockpulse.entity.TriggerReason;
+import jakarta.annotation.PostConstruct;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import jakarta.annotation.PostConstruct;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class AdvisorRegistry {
+    
+    private static final Logger log = LoggerFactory.getLogger(AdvisorRegistry.class);
     
     @Autowired
     private RuleBasedCommerceAdvisor ruleBasedAdvisor;
@@ -20,54 +26,56 @@ public class AdvisorRegistry {
     @Autowired
     private AICommerceAdvisor aiAdvisor;
     
-    @Autowired
-    private LlmConfig llmConfig;
+    @Value("${commerce.strategy:ai}")
+    private String defaultStrategy;
     
     private final Map<String, CommerceAdvisor> advisors = new ConcurrentHashMap<>();
     private volatile CommerceAdvisor activeAdvisor;
     
     @PostConstruct
     public void init() {
-        // Register available advisors
-        advisors.put("rule-based", ruleBasedAdvisor);
-        advisors.put("ai", aiAdvisor);
+        if (ruleBasedAdvisor != null) {
+            advisors.put("rule-based", ruleBasedAdvisor);
+        }
+        if (aiAdvisor != null) {
+            advisors.put("ai", aiAdvisor);
+        }
         
-        // Set initial active advisor
-        setActiveAdvisor("rule-based");
+        setActiveAdvisor(defaultStrategy != null ? defaultStrategy : "rule-based");
+        log.info("StockPulse AdvisorRegistry initialized with active strategy: {}", getCurrentStrategy());
     }
     
     public void setActiveAdvisor(String strategy) {
-        CommerceAdvisor advisor = advisors.get(strategy);
-        if (advisor != null) {
-            this.activeAdvisor = advisor;
+        String key = strategy.toLowerCase().trim();
+        if (advisors.containsKey(key)) {
+            this.activeAdvisor = advisors.get(key);
+            log.info("Commerce advisor switched to: {}", key);
         } else {
-            this.activeAdvisor = ruleBasedAdvisor; // fallback
+            log.warn("Unknown strategy '{}', defaulting to AI advisor", strategy);
+            this.activeAdvisor = aiAdvisor;
         }
     }
     
     public CommerceAdvisor getActiveAdvisor() {
-        // Check configuration for strategy change
-        String provider = llmConfig.getProvider();
-        if (!provider.equals(getCurrentStrategy())) {
-            setActiveAdvisor(provider);
+        if (activeAdvisor == null) {
+            activeAdvisor = aiAdvisor;
         }
         return activeAdvisor;
     }
     
     public String getCurrentStrategy() {
-        if (activeAdvisor == ruleBasedAdvisor) {
-            return "rule-based";
-        } else if (activeAdvisor == aiAdvisor) {
-            return "ai";
-        }
-        return "rule-based";
+        return getActiveAdvisor().getStrategyName();
     }
     
-    public PricingSuggestion generatePricingSuggestion(Product product) {
-        return getActiveAdvisor().generatePricingSuggestion(product);
+    public Set<String> getAvailableStrategies() {
+        return advisors.keySet();
     }
     
-    public ReorderSuggestion generateReorderSuggestion(Product product) {
-        return getActiveAdvisor().generateReorderSuggestion(product);
+    public PricingSuggestion generatePricingSuggestion(Product product, TriggerReason triggerReason) {
+        return getActiveAdvisor().generatePricingSuggestion(product, triggerReason);
+    }
+    
+    public ReorderSuggestion generateReorderSuggestion(Product product, TriggerReason triggerReason) {
+        return getActiveAdvisor().generateReorderSuggestion(product, triggerReason);
     }
 }

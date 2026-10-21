@@ -1,7 +1,7 @@
 package com.zycus.stockpulse.repository;
 
-import com.zycus.stockpulse.entity.ReorderSuggestion;
 import com.zycus.stockpulse.entity.Product;
+import com.zycus.stockpulse.entity.ReorderSuggestion;
 import com.zycus.stockpulse.entity.SuggestionStatus;
 import com.zycus.stockpulse.entity.TriggerReason;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -17,11 +17,16 @@ public interface ReorderSuggestionRepository extends JpaRepository<ReorderSugges
     
     List<ReorderSuggestion> findByProductId(Long productId);
     
-    List<ReorderSuggestion> findByStatus(SuggestionStatus status);
+    List<ReorderSuggestion> findByStatusOrderByCreatedAtDesc(SuggestionStatus status);
     
-    @Query("SELECT rs FROM ReorderSuggestion rs WHERE rs.product = :product AND rs.status = 'PENDING' AND rs.triggerReason = :triggerReason")
-    Optional<ReorderSuggestion> findPendingByProductAndTriggerReason(@Param("product") Product product, @Param("triggerReason") TriggerReason triggerReason);
+    List<ReorderSuggestion> findByProductAndStatus(Product product, SuggestionStatus status);
     
-    @Query("SELECT COUNT(rs) FROM ReorderSuggestion rs WHERE rs.product = :product AND rs.status = 'PENDING'")
-    long countPendingByProduct(@Param("product") Product product);
+    @Query("SELECT rs FROM ReorderSuggestion rs WHERE rs.product = :product AND rs.status = :status AND rs.triggerReason = :triggerReason")
+    Optional<ReorderSuggestion> findByProductAndStatusAndTriggerReason(
+            @Param("product") Product product, 
+            @Param("status") SuggestionStatus status, 
+            @Param("triggerReason") TriggerReason triggerReason);
+    
+    @Query("SELECT COUNT(rs) FROM ReorderSuggestion rs WHERE rs.product = :product AND rs.status = :status")
+    long countByProductAndStatus(@Param("product") Product product, @Param("status") SuggestionStatus status);
 }

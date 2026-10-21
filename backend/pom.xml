@@ -14,7 +14,7 @@
 	<name>stockpulse</name>
 	<description>StockPulse AI Inventory and Dynamic Pricing Engine</description>
 	<properties>
-		<java.version>21</java.version>
+		<java.version>17</java.version>
 	</properties>
 	<dependencies>
 		<dependency>

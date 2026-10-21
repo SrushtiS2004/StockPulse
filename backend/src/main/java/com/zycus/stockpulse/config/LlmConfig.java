@@ -8,9 +8,11 @@ import org.springframework.stereotype.Component;
 public class LlmConfig {
     
     private String baseUrl = "http://localhost:11434/v1";
-    private String apiKey = "your-api-key-here";
+    private String apiKey = "";
     private String model = "gpt-3.5-turbo";
     private String provider = "rule-based";
+    private String productHeader = "PC1";
+    private String cookie = "";
     
     // Getters and setters
     public String getBaseUrl() {
@@ -43,5 +45,21 @@ public class LlmConfig {
     
     public void setProvider(String provider) {
         this.provider = provider;
+    }
+
+    public String getProductHeader() {
+        return productHeader;
+    }
+
+    public void setProductHeader(String productHeader) {
+        this.productHeader = productHeader;
+    }
+
+    public String getCookie() {
+        return cookie;
+    }
+
+    public void setCookie(String cookie) {
+        this.cookie = cookie;
     }
 }

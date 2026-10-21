@@ -1,6 +1,7 @@
 package com.zycus.stockpulse.entity;
 
 import jakarta.persistence.*;
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "reorder_suggestions")
@@ -10,33 +11,44 @@ public class ReorderSuggestion {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "product_id")
+    @ManyToOne(fetch = FetchType.EAGER)
+    @JoinColumn(name = "product_id", nullable = false)
     private Product product;
     
+    @Column(nullable = false)
     private Integer currentStock;
     
+    @Column(nullable = false)
     private Integer recommendedQuantity;
     
+    @Column(nullable = false)
     private Integer suggestedLeadTime;
     
-    @Column(scale = 2)
+    @Column(nullable = false)
     private Double confidence;
     
-    @Column(length = 1000)
+    @Column(length = 2000, nullable = false)
     private String reasoning;
     
     @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
     private SuggestionStatus status;
     
     @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
     private TriggerReason triggerReason;
     
+    @Column(nullable = false)
+    private LocalDateTime createdAt;
+    
     // Constructors
-    public ReorderSuggestion() {}
+    public ReorderSuggestion() {
+        this.createdAt = LocalDateTime.now();
+        this.status = SuggestionStatus.PENDING;
+    }
     
     public ReorderSuggestion(Product product, Integer currentStock, Integer recommendedQuantity, 
-                           Integer suggestedLeadTime, Double confidence, String reasoning, TriggerReason triggerReason) {
+                             Integer suggestedLeadTime, Double confidence, String reasoning, TriggerReason triggerReason) {
         this.product = product;
         this.currentStock = currentStock;
         this.recommendedQuantity = recommendedQuantity;
@@ -45,6 +57,7 @@ public class ReorderSuggestion {
         this.reasoning = reasoning;
         this.triggerReason = triggerReason;
         this.status = SuggestionStatus.PENDING;
+        this.createdAt = LocalDateTime.now();
     }
     
     // Getters and Setters
@@ -118,5 +131,13 @@ public class ReorderSuggestion {
     
     public void setTriggerReason(TriggerReason triggerReason) {
         this.triggerReason = triggerReason;
+    }
+    
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
+    }
+    
+    public void setCreatedAt(LocalDateTime createdAt) {
+        this.createdAt = createdAt;
     }
 }

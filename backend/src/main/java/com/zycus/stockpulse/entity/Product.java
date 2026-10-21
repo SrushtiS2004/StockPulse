@@ -15,34 +15,41 @@ public class Product {
     private Long id;
     
     @NotBlank
-    @Column(unique = true)
+    @Column(unique = true, nullable = false)
     private String sku;
     
     @NotBlank
+    @Column(nullable = false)
     private String name;
     
     @Enumerated(EnumType.STRING)
     @NotNull
+    @Column(nullable = false)
     private Category category;
     
     @PositiveOrZero
-    @Column(precision = 10, scale = 2)
+    @Column(precision = 10, scale = 2, nullable = false)
     private BigDecimal currentPrice;
     
+    // Sprint 2 seam: Margin floor & cost tracking placeholder
     @Column(precision = 10, scale = 2)
     private BigDecimal costPrice;
     
     @PositiveOrZero
+    @Column(nullable = false)
     private Integer stockLevel;
     
     @PositiveOrZero
+    @Column(nullable = false)
     private Integer reorderThreshold;
     
     @PositiveOrZero
+    @Column(nullable = false)
     private Integer demandVelocity;
     
     @Enumerated(EnumType.STRING)
     @NotNull
+    @Column(nullable = false)
     private ProductStatus status;
     
     // Constructors
@@ -57,9 +64,52 @@ public class Product {
         this.stockLevel = stockLevel;
         this.reorderThreshold = reorderThreshold;
         this.demandVelocity = demandVelocity;
-        this.status = ProductStatus.ACTIVE;
+        this.status = stockLevel <= 0 ? ProductStatus.OUT_OF_STOCK : ProductStatus.ACTIVE;
     }
     
+    public Product(String sku, String name, Category category, BigDecimal currentPrice, 
+                   Integer stockLevel, Integer reorderThreshold, Integer demandVelocity, ProductStatus status) {
+        this.sku = sku;
+        this.name = name;
+        this.category = category;
+        this.currentPrice = currentPrice;
+        this.stockLevel = stockLevel;
+        this.reorderThreshold = reorderThreshold;
+        this.demandVelocity = demandVelocity;
+        this.status = status;
+    }
+    
+    // Business logic helpers
+    public void recordSale() {
+        if (this.stockLevel > 0) {
+            this.stockLevel -= 1;
+        }
+        this.demandVelocity += 1;
+        if (this.stockLevel <= 0) {
+            this.status = ProductStatus.OUT_OF_STOCK;
+        } else if (this.stockLevel <= this.reorderThreshold) {
+            this.status = ProductStatus.PRICE_REVIEW_PENDING;
+        }
+    }
+    
+    public void replenishStock(int quantity) {
+        this.stockLevel += quantity;
+        if (this.stockLevel > this.reorderThreshold) {
+            this.status = ProductStatus.ACTIVE;
+        } else if (this.stockLevel > 0 && this.status == ProductStatus.OUT_OF_STOCK) {
+            this.status = ProductStatus.PRICE_REVIEW_PENDING;
+        }
+    }
+    
+    public void applyNewPrice(BigDecimal newPrice) {
+        this.currentPrice = newPrice;
+        if (this.status == ProductStatus.PRICE_REVIEW_PENDING) {
+            if (this.stockLevel > this.reorderThreshold) {
+                this.status = ProductStatus.ACTIVE;
+            }
+        }
+    }
+
     // Getters and Setters
     public Long getId() {
         return id;
@@ -115,10 +165,9 @@ public class Product {
     
     public void setStockLevel(Integer stockLevel) {
         this.stockLevel = stockLevel;
-        // Update status based on stock level
         if (this.stockLevel <= 0) {
             this.status = ProductStatus.OUT_OF_STOCK;
-        } else if (this.status == ProductStatus.OUT_OF_STOCK) {
+        } else if (this.stockLevel <= this.reorderThreshold && this.status != ProductStatus.OUT_OF_STOCK) {
             this.status = ProductStatus.PRICE_REVIEW_PENDING;
         }
     }

@@ -17,11 +17,16 @@ public interface PricingSuggestionRepository extends JpaRepository<PricingSugges
     
     List<PricingSuggestion> findByProductId(Long productId);
     
-    List<PricingSuggestion> findByStatus(SuggestionStatus status);
+    List<PricingSuggestion> findByStatusOrderByCreatedAtDesc(SuggestionStatus status);
     
-    @Query("SELECT ps FROM PricingSuggestion ps WHERE ps.product = :product AND ps.status = 'PENDING' AND ps.triggerReason = :triggerReason")
-    Optional<PricingSuggestion> findPendingByProductAndTriggerReason(@Param("product") Product product, @Param("triggerReason") TriggerReason triggerReason);
+    List<PricingSuggestion> findByProductAndStatus(Product product, SuggestionStatus status);
     
-    @Query("SELECT COUNT(ps) FROM PricingSuggestion ps WHERE ps.product = :product AND ps.status = 'PENDING'")
-    long countPendingByProduct(@Param("product") Product product);
+    @Query("SELECT ps FROM PricingSuggestion ps WHERE ps.product = :product AND ps.status = :status AND ps.triggerReason = :triggerReason")
+    Optional<PricingSuggestion> findByProductAndStatusAndTriggerReason(
+            @Param("product") Product product, 
+            @Param("status") SuggestionStatus status, 
+            @Param("triggerReason") TriggerReason triggerReason);
+    
+    @Query("SELECT COUNT(ps) FROM PricingSuggestion ps WHERE ps.product = :product AND ps.status = :status")
+    long countByProductAndStatus(@Param("product") Product product, @Param("status") SuggestionStatus status);
 }

@@ -1,876 +1,847 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import './App.css'
 
 function App() {
   const [products, setProducts] = useState([])
   const [pricingSuggestions, setPricingSuggestions] = useState([])
   const [reorderSuggestions, setReorderSuggestions] = useState([])
+  const [activeStrategy, setActiveStrategy] = useState('ai')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
-  const [usingMockData, setUsingMockData] = useState(false)
+  const [categoryFilter, setCategoryFilter] = useState('ALL')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [activeTab, setActiveTab] = useState('pricing') // 'pricing' | 'reorder'
+  const [toast, setToast] = useState(null)
+  const [showGuide, setShowGuide] = useState(true)
 
-  // Mock data for demonstration
-  const mockProducts = [
-    {
-      id: 'PRD-001',
-      sku: 'SKU-ELEC-001',
-      name: 'Wireless Earbuds Pro',
-      category: 'ELECTRONICS',
-      currentPrice: 79.99,
-      stockLevel: 45,
-      reorderThreshold: 20,
-      demandVelocity: 3,
-      status: 'ACTIVE'
-    },
-    {
-      id: 'PRD-002',
-      sku: 'SKU-ELEC-002',
-      name: 'USB-C Hub 7-Port',
-      category: 'ELECTRONICS',
-      currentPrice: 34.99,
-      stockLevel: 120,
-      reorderThreshold: 30,
-      demandVelocity: 1,
-      status: 'ACTIVE'
-    },
-    {
-      id: 'PRD-003',
-      sku: 'SKU-APP-001',
-      name: 'Organic Cotton T-Shirt',
-      category: 'APPAREL',
-      currentPrice: 24.99,
-      stockLevel: 8,
-      reorderThreshold: 15,
-      demandVelocity: 12,
-      status: 'PRICE_REVIEW_PENDING'
-    },
-    {
-      id: 'PRD-004',
-      sku: 'SKU-APP-002',
-      name: 'Running Shorts — Navy',
-      category: 'APPAREL',
-      currentPrice: 39.99,
-      stockLevel: 55,
-      reorderThreshold: 20,
-      demandVelocity: 2,
-      status: 'ACTIVE'
-    },
-    {
-      id: 'PRD-005',
-      sku: 'SKU-HOME-001',
-      name: 'Ceramic Pour-Over Set',
-      category: 'HOME',
-      currentPrice: 49.99,
-      stockLevel: 22,
-      reorderThreshold: 10,
-      demandVelocity: 4,
-      status: 'ACTIVE'
-    },
-    {
-      id: 'PRD-006',
-      sku: 'SKU-HOME-002',
-      name: 'LED Desk Lamp — Dimmable',
-      category: 'HOME',
-      currentPrice: 59.99,
-      stockLevel: 0,
-      reorderThreshold: 15,
-      demandVelocity: 0,
-      status: 'OUT_OF_STOCK'
-    },
-    {
-      id: 'PRD-007',
-      sku: 'SKU-ELEC-003',
-      name: 'Portable Charger 20K',
-      category: 'ELECTRONICS',
-      currentPrice: 44.99,
-      stockLevel: 18,
-      reorderThreshold: 25,
-      demandVelocity: 8,
-      status: 'ACTIVE'
-    },
-    {
-      id: 'PRD-008',
-      sku: 'SKU-APP-003',
-      name: 'Hoodie — Heather Grey',
-      category: 'APPAREL',
-      currentPrice: 54.99,
-      stockLevel: 11,
-      reorderThreshold: 12,
-      demandVelocity: 15,
-      status: 'ACTIVE'
-    }
-  ]
+  // SSE Stream Modal State (Bonus Feature)
+  const [streamingProduct, setStreamingProduct] = useState(null)
+  const [streamLogs, setStreamLogs] = useState([])
+  const [isStreaming, setIsStreaming] = useState(false)
+  const eventSourceRef = useRef(null)
 
-  const mockPricingSuggestions = [
-    {
-      id: 'PS-001',
-      productId: 'PRD-003',
-      productName: 'Organic Cotton T-Shirt',
-      productSku: 'SKU-APP-001',
-      currentPrice: 24.99,
-      recommendedPrice: 29.99,
-      changeDirection: 'INCREASE',
-      confidence: 0.85,
-      reasoning: 'Stock level (8) is below reorder threshold (15). Recommend increasing price by 20% to protect remaining inventory while demand velocity (12) remains high.',
-      status: 'PENDING',
-      triggerReason: 'INVENTORY_LOW'
-    },
-    {
-      id: 'PS-002',
-      productId: 'PRD-008',
-      productName: 'Hoodie — Heather Grey',
-      productSku: 'SKU-APP-003',
-      currentPrice: 54.99,
-      recommendedPrice: 65.99,
-      changeDirection: 'INCREASE',
-      confidence: 0.92,
-      reasoning: 'Demand velocity (15) exceeds category average by 3x. Recommend capturing premium while trend is active.',
-      status: 'PENDING',
-      triggerReason: 'DEMAND_SPIKE'
-    }
-  ]
+  const showToast = (msg) => {
+    setToast(msg)
+    setTimeout(() => {
+      setToast(prev => prev === msg ? null : prev)
+    }, 3800)
+  }
 
-  const mockReorderSuggestions = [
-    {
-      id: 'RS-001',
-      productId: 'PRD-003',
-      productName: 'Organic Cotton T-Shirt',
-      productSku: 'SKU-APP-001',
-      currentStock: 8,
-      recommendedQuantity: 50,
-      suggestedLeadTime: 5,
-      confidence: 0.78,
-      reasoning: 'Current stock (8) is critically low. Recommend ordering 50 units to maintain buffer stock for upcoming season.',
-      status: 'PENDING',
-      triggerReason: 'INVENTORY_LOW'
-    },
-    {
-      id: 'RS-002',
-      productId: 'PRD-008',
-      productName: 'Hoodie — Heather Grey',
-      productSku: 'SKU-APP-003',
-      currentStock: 11,
-      recommendedQuantity: 75,
-      suggestedLeadTime: 7,
-      confidence: 0.88,
-      reasoning: 'High demand velocity (15) suggests continued strong sales. Recommend larger order to avoid stockouts.',
-      status: 'PENDING',
-      triggerReason: 'DEMAND_SPIKE'
-    }
-  ]
-
-  // Fetch data from backend with mock fallback
+  // Fetch live state from backend
   const fetchData = async () => {
-    setLoading(true)
-    setError(null)
     try {
-      // Try to fetch products from backend
-      const productsResponse = await fetch('http://localhost:8080/api/products')
-      if (productsResponse.ok) {
-        const productsData = await productsResponse.json()
-        setProducts(productsData)
-        setUsingMockData(false)
-      } else {
-        throw new Error('Failed to fetch products')
-      }
+      setError(null)
+      const [prodRes, priceRes, reorderRes, stratRes] = await Promise.all([
+        fetch('/api/products').catch(() => fetch('http://localhost:8081/api/products')),
+        fetch('/api/pricing-suggestions?status=PENDING').catch(() => fetch('http://localhost:8081/api/pricing-suggestions?status=PENDING')),
+        fetch('/api/reorder-suggestions?status=PENDING').catch(() => fetch('http://localhost:8081/api/reorder-suggestions?status=PENDING')),
+        fetch('/api/commerce/strategy').catch(() => fetch('http://localhost:8081/api/commerce/strategy'))
+      ])
 
-      // Try to fetch pending pricing suggestions
-      const pricingResponse = await fetch('http://localhost:8080/api/pricing-suggestions?status=PENDING')
-      if (pricingResponse.ok) {
-        const pricingData = await pricingResponse.json()
-        setPricingSuggestions(pricingData)
-      } else {
-        throw new Error('Failed to fetch pricing suggestions')
+      if (prodRes && prodRes.ok) {
+        const prodData = await prodRes.json()
+        setProducts(prodData)
       }
-
-      // Try to fetch pending reorder suggestions
-      const reorderResponse = await fetch('http://localhost:8080/api/reorder-suggestions?status=PENDING')
-      if (reorderResponse.ok) {
-        const reorderData = await reorderResponse.json()
+      if (priceRes && priceRes.ok) {
+        const priceData = await priceRes.json()
+        setPricingSuggestions(priceData)
+      }
+      if (reorderRes && reorderRes.ok) {
+        const reorderData = await reorderRes.json()
         setReorderSuggestions(reorderData)
-      } else {
-        throw new Error('Failed to fetch reorder suggestions')
+      }
+      if (stratRes && stratRes.ok) {
+        const stratData = await stratRes.json()
+        if (stratData.activeStrategy) {
+          setActiveStrategy(stratData.activeStrategy)
+        }
       }
     } catch (err) {
-      // Use mock data when backend is unavailable
-      console.log('Backend unavailable, using mock data for demo')
-      setProducts(mockProducts)
-      setPricingSuggestions(mockPricingSuggestions)
-      setReorderSuggestions(mockReorderSuggestions)
-      setUsingMockData(true)
-      setError('Backend not available - showing demo data')
+      console.error('Fetch error:', err)
+      setError('Connecting to StockPulse Backend on port 8081...')
     } finally {
       setLoading(false)
     }
   }
 
-  // Handle suggestion acceptance
-  const handleAcceptSuggestion = (type, id) => {
-    // Immediate visual feedback
-    alert(`✅ ${type.charAt(0).toUpperCase() + type.slice(1)} suggestion accepted!`)
-    
-    // Remove from UI immediately
-    if (type === 'pricing') {
-      setPricingSuggestions(prev => prev.filter(s => s.id !== id))
-    } else {
-      setReorderSuggestions(prev => prev.filter(s => s.id !== id))
-    }
-    
-    // In demo mode, this is all we need to do
-    console.log(`${type} suggestion ${id} accepted in demo mode`)
-  }
-
-  // Handle suggestion rejection
-  const handleRejectSuggestion = (type, id) => {
-    // Immediate visual feedback
-    alert(`❌ ${type.charAt(0).toUpperCase() + type.slice(1)} suggestion rejected!`)
-    
-    // Remove from UI immediately
-    if (type === 'pricing') {
-      setPricingSuggestions(prev => prev.filter(s => s.id !== id))
-    } else {
-      setReorderSuggestions(prev => prev.filter(s => s.id !== id))
-    }
-    
-    // In demo mode, this is all we need to do
-    console.log(`${type} suggestion ${id} rejected in demo mode`)
-  }
-
-  // Comment out the original complex functions to prevent conflicts
-  /*
-  const handleAcceptSuggestionOriginal = async (type, id) => {
-    try {
-      const response = await fetch(`http://localhost:8080/api/${type}-suggestions/${id}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ status: 'ACCEPTED' })
-      })
-
-      if (response.ok) {
-        // Refresh data
-        fetchData()
-      } else {
-        // Simulate acceptance with mock data
-        if (usingMockData) {
-          if (type === 'pricing') {
-            setPricingSuggestions(prev => prev.filter(s => s.id !== id))
-          } else {
-            setReorderSuggestions(prev => prev.filter(s => s.id !== id))
-          }
-          alert(`${type.charAt(0).toUpperCase() + type.slice(1)} suggestion accepted!`)
-        } else {
-          throw new Error('Failed to update suggestion')
-        }
-      }
-    } catch (err) {
-      // Handle mock acceptance
-      if (usingMockData) {
-        if (type === 'pricing') {
-          setPricingSuggestions(prev => prev.filter(s => s.id !== id))
-        } else {
-          setReorderSuggestions(prev => prev.filter(s => s.id !== id))
-        }
-        alert(`${type.charAt(0).toUpperCase() + type.slice(1)} suggestion accepted!`)
-      } else {
-        setError('Failed to accept suggestion: ' + err.message)
-        console.error('Error accepting suggestion:', err)
-      }
-    }
-  }
-
-  const handleRejectSuggestionOriginal = async (type, id) => {
-    try {
-      const response = await fetch(`http://localhost:8080/api/${type}-suggestions/${id}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ status: 'REJECTED' })
-      })
-
-      if (response.ok) {
-        fetchData()
-      } else {
-        if (usingMockData) {
-          if (type === 'pricing') {
-            setPricingSuggestions(prev => prev.filter(s => s.id !== id))
-          } else {
-            setReorderSuggestions(prev => prev.filter(s => s.id !== id))
-          }
-          alert(`${type.charAt(0).toUpperCase() + type.slice(1)} suggestion rejected!`)
-        } else {
-          throw new Error('Failed to update suggestion')
-        }
-      }
-    } catch (err) {
-      if (usingMockData) {
-        if (type === 'pricing') {
-          setPricingSuggestions(prev => prev.filter(s => s.id !== id))
-        } else {
-          setReorderSuggestions(prev => prev.filter(s => s.id !== id))
-        }
-        alert(`${type.charAt(0).toUpperCase() + type.slice(1)} suggestion rejected!`)
-      } else {
-        setError('Failed to reject suggestion: ' + err.message)
-        console.error('Error rejecting suggestion:', err)
-      }
-    }
-  }
-  */
-
-  // Handle suggestion acceptance
-  const handleAcceptSuggestion = async (type, id) => {
-    try {
-      const response = await fetch(`http://localhost:8080/api/${type}-suggestions/${id}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ status: 'ACCEPTED' })
-      })
-
-      if (response.ok) {
-        // Refresh data
-        fetchData()
-      } else {
-        // Simulate acceptance with mock data
-        if (usingMockData) {
-          if (type === 'pricing') {
-            setPricingSuggestions(prev => prev.filter(s => s.id !== id))
-          } else {
-            setReorderSuggestions(prev => prev.filter(s => s.id !== id))
-          }
-          alert(`${type.charAt(0).toUpperCase() + type.slice(1)} suggestion accepted!`)
-        } else {
-          throw new Error('Failed to update suggestion')
-        }
-      }
-    } catch (err) {
-      // Handle mock acceptance
-      if (usingMockData) {
-        if (type === 'pricing') {
-          setPricingSuggestions(prev => prev.filter(s => s.id !== id))
-        } else {
-          setReorderSuggestions(prev => prev.filter(s => s.id !== id))
-        }
-        alert(`${type.charAt(0).toUpperCase() + type.slice(1)} suggestion accepted!`)
-      } else {
-        setError('Failed to accept suggestion: ' + err.message)
-        console.error('Error accepting suggestion:', err)
-      }
-    }
-  }
-
-  // Handle suggestion rejection
-  const handleRejectSuggestion = async (type, id) => {
-    try {
-      const response = await fetch(`http://localhost:8080/api/${type}-suggestions/${id}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ status: 'REJECTED' })
-      })
-
-      if (response.ok) {
-        // Refresh data
-        fetchData()
-      } else {
-        // Simulate rejection with mock data
-        if (usingMockData) {
-          if (type === 'pricing') {
-            setPricingSuggestions(prev => prev.filter(s => s.id !== id))
-          } else {
-            setReorderSuggestions(prev => prev.filter(s => s.id !== id))
-          }
-          alert(`${type.charAt(0).toUpperCase() + type.slice(1)} suggestion rejected!`)
-        } else {
-          throw new Error('Failed to update suggestion')
-        }
-      }
-    } catch (err) {
-      // Handle mock rejection
-      if (usingMockData) {
-        if (type === 'pricing') {
-          setPricingSuggestions(prev => prev.filter(s => s.id !== id))
-        } else {
-          setReorderSuggestions(prev => prev.filter(s => s.id !== id))
-        }
-        alert(`${type.charAt(0).toUpperCase() + type.slice(1)} suggestion rejected!`)
-      } else {
-        setError('Failed to reject suggestion: ' + err.message)
-        console.error('Error rejecting suggestion:', err)
-      }
-    }
-  }
-
-  // Simulate sale
-  const handleSimulateSale = async (productId) => {
-    try {
-      const response = await fetch(`http://localhost:8080/api/products/${productId}/orders`, {
-        method: 'POST'
-      })
-
-      if (response.ok) {
-        // Refresh data
-        fetchData()
-      } else {
-        // Simulate sale with mock data
-        if (usingMockData) {
-          setProducts(prev => prev.map(product => {
-            if (product.id === productId && product.stockLevel > 0) {
-              const newStock = product.stockLevel - 1
-              const newVelocity = product.demandVelocity + 1
-              return {
-                ...product,
-                stockLevel: newStock,
-                demandVelocity: newVelocity,
-                status: newStock === 0 ? 'OUT_OF_STOCK' : product.status
-              }
-            }
-            return product
-          }))
-          
-          // Simulate new suggestions appearing
-          setTimeout(() => {
-            alert('Sale simulated! New suggestions may appear based on stock/demand changes.')
-            fetchData()
-          }, 1000)
-        } else {
-          throw new Error('Failed to simulate sale')
-        }
-      }
-    } catch (err) {
-      // Handle mock sale
-      if (usingMockData) {
-        setProducts(prev => prev.map(product => {
-          if (product.id === productId && product.stockLevel > 0) {
-            const newStock = product.stockLevel - 1
-            const newVelocity = product.demandVelocity + 1
-            return {
-              ...product,
-              stockLevel: newStock,
-              demandVelocity: newVelocity,
-              status: newStock === 0 ? 'OUT_OF_STOCK' : product.status
-            }
-          }
-          return product
-        }))
-        
-        // Simulate new suggestions appearing
-        setTimeout(() => {
-          alert('Sale simulated! New suggestions may appear based on stock/demand changes.')
-          fetchData()
-        }, 1000)
-      } else {
-        setError('Failed to simulate sale: ' + err.message)
-        console.error('Error simulating sale:', err)
-      }
-    }
-  }
-
-  // Update stock
-  const handleUpdateStock = async (productId, newStock) => {
-    try {
-      const response = await fetch(`http://localhost:8080/api/products/${productId}/stock`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ stockLevel: parseInt(newStock) })
-      })
-
-      if (response.ok) {
-        // Refresh data
-        fetchData()
-      } else {
-        // Simulate stock update with mock data
-        if (usingMockData) {
-          setProducts(prev => prev.map(product => {
-            if (product.id === productId) {
-              return {
-                ...product,
-                stockLevel: parseInt(newStock),
-                status: parseInt(newStock) === 0 ? 'OUT_OF_STOCK' : 
-                        parseInt(newStock) < product.reorderThreshold ? 'PRICE_REVIEW_PENDING' : 'ACTIVE'
-              }
-            }
-            return product
-          }))
-          
-          setTimeout(() => {
-            alert('Stock updated! System may generate new suggestions based on threshold changes.')
-            fetchData()
-          }, 1000)
-        } else {
-          throw new Error('Failed to update stock')
-        }
-      }
-    } catch (err) {
-      // Handle mock stock update
-      if (usingMockData) {
-        setProducts(prev => prev.map(product => {
-          if (product.id === productId) {
-            return {
-              ...product,
-              stockLevel: parseInt(newStock),
-              status: parseInt(newStock) === 0 ? 'OUT_OF_STOCK' : 
-                      parseInt(newStock) < product.reorderThreshold ? 'PRICE_REVIEW_PENDING' : 'ACTIVE'
-            }
-          }
-          return product
-        }))
-        
-        setTimeout(() => {
-          alert('Stock updated! System may generate new suggestions based on threshold changes.')
-          fetchData()
-        }, 1000)
-      } else {
-        setError('Failed to update stock: ' + err.message)
-        console.error('Error updating stock:', err)
-      }
-    }
-  }
-
-  // Simulate demand spike
-  const handleSimulateDemandSpike = async (productId) => {
-    try {
-      // Make multiple rapid sales to simulate demand spike
-      const promises = []
-      for (let i = 0; i < 5; i++) {
-        promises.push(fetch(`http://localhost:8080/api/products/${productId}/orders`, {
-          method: 'POST'
-        }))
-      }
-      
-      await Promise.all(promises)
-      fetchData()
-    } catch (err) {
-      // Handle mock demand spike
-      if (usingMockData) {
-        setProducts(prev => prev.map(product => {
-          if (product.id === productId && product.stockLevel >= 5) {
-            const newStock = product.stockLevel - 5
-            const newVelocity = product.demandVelocity + 10
-            return {
-              ...product,
-              stockLevel: newStock,
-              demandVelocity: newVelocity,
-              status: newStock === 0 ? 'OUT_OF_STOCK' : product.status
-            }
-          }
-          return product
-        }))
-        
-        setTimeout(() => {
-          alert('Demand spike simulated! New suggestions generated for high-velocity items.')
-          fetchData()
-        }, 1000)
-      } else {
-        setError('Failed to simulate demand spike: ' + err.message)
-        console.error('Error simulating demand spike:', err)
-      }
-    }
-  }
-
-  // Initialize data on component mount
+  // Auto-poll every 3 seconds for reactive agentic loop updates
   useEffect(() => {
+    setLoading(true)
     fetchData()
-    // Set up polling for real-time updates (every 30 seconds)
-    const interval = setInterval(fetchData, 30000)
+    const interval = setInterval(fetchData, 3000)
     return () => clearInterval(interval)
   }, [])
 
-  // Calculate summary statistics
-  const totalProducts = products.length
-  const lowStockProducts = products.filter(p => p.stockLevel <= p.reorderThreshold).length
-  const pendingPricingSuggestions = pricingSuggestions.length
-  const pendingReorderSuggestions = reorderSuggestions.length
-
-  if (loading && products.length === 0) {
-    return <div className="app">Loading...</div>
+  // Strategy Switcher
+  const handleToggleStrategy = async (strategyName) => {
+    try {
+      const res = await fetch(`/api/commerce/strategy?strategy=${strategyName}`, { method: 'POST' })
+      if (res.ok) {
+        setActiveStrategy(strategyName)
+        showToast(`Strategy switched to ${strategyName.toUpperCase()}`)
+      }
+    } catch (e) {
+      showToast(`Strategy toggle error: ${e.message}`)
+    }
   }
 
+  // Record Sale Simulation
+  const handleSimulateSale = async (product) => {
+    try {
+      const res = await fetch(`/api/products/${product.id}/orders`, { method: 'POST' })
+      if (res.ok) {
+        showToast(`Sale recorded for ${product.name}! Stock -1, Velocity +1.`)
+        await fetchData()
+      }
+    } catch (e) {
+      showToast(`Sale error: ${e.message}`)
+    }
+  }
+
+  // Rapid Demand Spike Simulation
+  const handleSimulateSurge = async (product) => {
+    try {
+      showToast(`Simulating viral sales spike on ${product.name}...`)
+      await Promise.all([
+        fetch(`/api/products/${product.id}/orders`, { method: 'POST' }),
+        fetch(`/api/products/${product.id}/orders`, { method: 'POST' }),
+        fetch(`/api/products/${product.id}/orders`, { method: 'POST' }),
+        fetch(`/api/products/${product.id}/orders`, { method: 'POST' })
+      ])
+      showToast(`Surge triggered! Demand velocity pushed above 3x category average.`)
+      await fetchData()
+    } catch (e) {
+      showToast(`Surge error: ${e.message}`)
+    }
+  }
+
+  // Reset Demo Catalog to Initial Seed
+  const handleResetDemoData = async () => {
+    try {
+      showToast('Resetting catalog & re-seeding demo baseline...')
+      const res = await fetch('/api/products/reset', { method: 'POST' })
+      if (res.ok) {
+        showToast('Demo catalog reset successfully! 8 fresh SKUs re-initialized.')
+        await fetchData()
+      }
+    } catch (e) {
+      showToast(`Reset error: ${e.message}`)
+    }
+  }
+
+  // On-Demand AI Pricing Analysis
+  const handleTriggerPricing = async (product) => {
+    try {
+      showToast(`Analyzing pricing for ${product.sku} via ${activeStrategy.toUpperCase()} advisor...`)
+      const res = await fetch(`/api/products/${product.id}/suggest-pricing`, { method: 'POST' })
+      if (res.ok) {
+        showToast(`AI pricing generated for ${product.sku}! View in Dynamic Pricing tab.`)
+        setActiveTab('pricing')
+        await fetchData()
+      }
+    } catch (e) {
+      showToast(`Pricing error: ${e.message}`)
+    }
+  }
+
+  // On-Demand AI Reorder PO Analysis
+  const handleTriggerReorder = async (product) => {
+    try {
+      showToast(`Evaluating replenishment PO for ${product.sku}...`)
+      const res = await fetch(`/api/products/${product.id}/suggest-reorder`, { method: 'POST' })
+      if (res.ok) {
+        showToast(`AI replenishment PO generated for ${product.sku}! View in Replenishment tab.`)
+        setActiveTab('reorder')
+        await fetchData()
+      }
+    } catch (e) {
+      showToast(`Reorder error: ${e.message}`)
+    }
+  }
+
+  // Quick Stock Level Update
+  const handleUpdateStock = async (product, valStr) => {
+    const val = parseInt(valStr, 10)
+    if (isNaN(val) || val < 0 || val === product.stockLevel) return
+
+    try {
+      const res = await fetch(`/api/products/${product.id}/stock`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stockLevel: val })
+      })
+      if (res.ok) {
+        showToast(`Stock updated to ${val} units. Checking agentic triggers...`)
+        await fetchData()
+      }
+    } catch (e) {
+      showToast(`Update error: ${e.message}`)
+    }
+  }
+
+  // Accept Pricing Suggestion
+  const handleAcceptPricing = async (suggestion) => {
+    try {
+      const res = await fetch(`/api/pricing-suggestions/${suggestion.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'ACCEPTED' })
+      })
+      if (res.ok) {
+        showToast(`Approved! ${suggestion.productSku} price published to $${suggestion.recommendedPrice.toFixed(2)}`)
+        await fetchData()
+      }
+    } catch (e) {
+      showToast(`Accept error: ${e.message}`)
+    }
+  }
+
+  // Reject Pricing Suggestion
+  const handleRejectPricing = async (suggestion) => {
+    try {
+      const res = await fetch(`/api/pricing-suggestions/${suggestion.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'REJECTED' })
+      })
+      if (res.ok) {
+        showToast(`Pricing proposal declined.`)
+        await fetchData()
+      }
+    } catch (e) {
+      showToast(`Reject error: ${e.message}`)
+    }
+  }
+
+  // Accept Reorder Proposal
+  const handleAcceptReorder = async (suggestion) => {
+    try {
+      const res = await fetch(`/api/reorder-suggestions/${suggestion.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'ACCEPTED' })
+      })
+      if (res.ok) {
+        showToast(`Inbound stock approved! +${suggestion.recommendedQuantity} units added to inventory.`)
+        await fetchData()
+      }
+    } catch (e) {
+      showToast(`Accept error: ${e.message}`)
+    }
+  }
+
+  // Reject Reorder Proposal
+  const handleRejectReorder = async (suggestion) => {
+    try {
+      const res = await fetch(`/api/reorder-suggestions/${suggestion.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'REJECTED' })
+      })
+      if (res.ok) {
+        showToast(`Reorder proposal declined.`)
+        await fetchData()
+      }
+    } catch (e) {
+      showToast(`Reject error: ${e.message}`)
+    }
+  }
+
+  // SSE Stream Handler (Bonus)
+  const handleStartSseStream = (product) => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close()
+    }
+    setStreamingProduct(product)
+    setStreamLogs([])
+    setIsStreaming(true)
+
+    const url = `/api/products/${product.id}/suggest-pricing/stream`
+    const es = new EventSource(url)
+    eventSourceRef.current = es
+
+    es.addEventListener('status', (e) => {
+      setStreamLogs(prev => [...prev, { type: 'status', text: e.data }])
+    })
+    es.addEventListener('context', (e) => {
+      setStreamLogs(prev => [...prev, { type: 'context', text: e.data }])
+    })
+    es.addEventListener('chunk', (e) => {
+      setStreamLogs(prev => [...prev, { type: 'chunk', text: e.data }])
+    })
+    es.addEventListener('complete', (e) => {
+      setStreamLogs(prev => [...prev, { type: 'complete', text: e.data }])
+      setIsStreaming(false)
+      es.close()
+      fetch(`/api/products/${product.id}/suggest-pricing`, { method: 'POST' }).then(() => fetchData())
+    })
+    es.onerror = () => {
+      setIsStreaming(false)
+      es.close()
+    }
+  }
+
+  const handleCloseStream = () => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close()
+    }
+    setStreamingProduct(null)
+    setIsStreaming(false)
+  }
+
+  // Filtered Products
+  const filteredProducts = products.filter(p => {
+    const matchesCat = categoryFilter === 'ALL' || p.category === categoryFilter
+    const matchesSearch = !searchQuery || 
+      p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      p.sku.toLowerCase().includes(searchQuery.toLowerCase())
+    return matchesCat && matchesSearch
+  })
+
+  // KPI Calculations
+  const totalSkus = products.length
+  const lowStockCount = products.filter(p => p.stockLevel <= p.reorderThreshold).length
+  const pendingPricingCount = pricingSuggestions.length
+  const pendingReorderCount = reorderSuggestions.length
+  const totalUnitsToReorder = reorderSuggestions.reduce((acc, r) => acc + (r.recommendedQuantity || 0), 0)
+
   return (
-    <div className="app">
-      {/* Header */}
-      <div className="app-header">
-        <h1>StockPulse — AI Inventory & Dynamic Pricing</h1>
-        <p>Real-time inventory monitoring with AI-powered pricing and replenishment recommendations</p>
-        <div style={{ marginTop: '15px', display: 'flex', gap: '10px', justifyContent: 'center' }}>
-          <button onClick={fetchData} disabled={loading}>
-            {loading ? 'Refreshing...' : '🔄 Refresh Data'}
+    <div className="app-shell">
+      {/* Toast */}
+      {toast && <div className="toast-msg">⚡ {toast}</div>}
+
+      {/* Top Navbar */}
+      <nav className="navbar">
+        <div className="brand-section">
+          <div className="brand-logo">⚡</div>
+          <div>
+            <div className="brand-title">
+              StockPulse <span>Engine</span>
+              <span className="brand-tag">v2.4 Reactive</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="nav-actions">
+          <div className="status-pill">
+            <span className="radar-dot"></span>
+            AGENTIC LOOP ONLINE
+          </div>
+
+          <div className="strategy-segmented">
+            <button 
+              className={`strategy-opt ${activeStrategy === 'ai' ? 'active' : ''}`}
+              onClick={() => handleToggleStrategy('ai')}
+              title="Activate LLM Neural Commerce Intelligence"
+            >
+              ✦ AI Neural
+            </button>
+            <button 
+              className={`strategy-opt ${activeStrategy === 'rule-based' ? 'active' : ''}`}
+              onClick={() => handleToggleStrategy('rule-based')}
+              title="Activate Deterministic Fallback Rule Engine"
+            >
+              ⚙ Rules
+            </button>
+          </div>
+
+          <button className="btn-icon" onClick={fetchData} title="Sync Live State">
+            ↻ Sync
           </button>
-          <button onClick={() => alert('🎉 Test Button Works! All buttons in StockPulse are now functional for your demo!')}>
-            🧪 Test Button Functionality
+
+          <button className="btn-reset" onClick={handleResetDemoData} title="Reset catalog to clean baseline">
+            ↺ Reset Demo Data
           </button>
         </div>
-        {usingMockData && (
-          <div style={{ marginTop: '10px', padding: '10px', backgroundColor: '#fff3cd', borderRadius: '4px', border: '1px solid #ffeaa7' }}>
-            <strong>Demo Mode:</strong> Using mock data for demonstration purposes
+      </nav>
+
+      {/* Connection Notice */}
+      {error && (
+        <div style={{ background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', color: '#fbbf24', padding: '12px 18px', borderRadius: '8px', marginBottom: '20px', fontSize: '13px' }}>
+          <strong>Backend Status:</strong> {error}
+        </div>
+      )}
+
+      {/* Hackathon Interactive Walkthrough Guide */}
+      <div className="guide-banner">
+        <div className="guide-header" onClick={() => setShowGuide(!showGuide)}>
+          <div className="guide-title">
+            <span>⚡</span>
+            <span>HACKATHON EVALUATION GUIDE &amp; TEST SCENARIOS</span>
+            <span style={{ fontSize: '11px', background: 'rgba(99, 102, 241, 0.25)', padding: '2px 8px', borderRadius: '4px', marginLeft: '6px' }}>
+              4 Core Scenarios
+            </span>
+          </div>
+          <span style={{ color: 'var(--cyan)', fontSize: '13px', fontFamily: 'var(--font-mono)' }}>
+            {showGuide ? '▲ Hide Guide' : '▼ Show Test Guide'}
+          </span>
+        </div>
+
+        {showGuide && (
+          <div className="guide-content">
+            <div className="guide-step">
+              <div className="guide-step-num">Flow 1 · Low Stock &amp; Replenishment</div>
+              <div>
+                Click <strong>+ Sale</strong> on <code>PRD-001</code> (stock 16 &rarr; 15, hitting threshold 15) or change stock directly in the table input box.
+                The event listener triggers an autonomous purchase order in the <strong>Replenishment POs</strong> tab!
+              </div>
+            </div>
+
+            <div className="guide-step">
+              <div className="guide-step-num">Flow 2 · Demand Surge &amp; Dynamic Pricing</div>
+              <div>
+                Click <strong>⚡ Surge</strong> on any item (e.g. <code>PRD-002</code>). This fires 4 rapid orders, pushing 24h velocity over 3x the category baseline, triggering dynamic pricing proposals.
+              </div>
+            </div>
+
+            <div className="guide-step">
+              <div className="guide-step-num">Flow 3 · Human-in-the-Loop Decisioning</div>
+              <div>
+                Inspect proposals in <strong>Dynamic Pricing</strong> and <strong>Replenishment POs</strong> tabs with AI reasoning and confidence meters.
+                Click <strong>Publish Price &rarr;</strong> or <strong>Approve Inbound &rarr;</strong> to verify live database execution.
+              </div>
+            </div>
+
+            <div className="guide-step">
+              <div className="guide-step-num">Flow 4 · Model Switch &amp; SSE Streaming (Bonus)</div>
+              <div>
+                Toggle between <strong>✦ AI Neural</strong> and <strong>⚙ Rules</strong> in the top navbar.
+                Click <strong>✦ AI Stream</strong> on any row to open the real-time SSE terminal modal and watch live LLM tokens streaming!
+              </div>
+            </div>
           </div>
         )}
       </div>
 
-      {/* Error message */}
-      {error && (
-        <div className="error-message">
-          <span>{error}</span>
-          <button onClick={() => setError(null)}>×</button>
-        </div>
-      )}
-
-      {/* Loading indicator */}
-      {loading && !usingMockData && (
-        <div className="card" style={{ textAlign: 'center', padding: '40px' }}>
-          <p>Loading data from backend...</p>
-        </div>
-      )}
-
-      {/* Summary cards */}
-      <div className="summary-cards">
-        <div className="card summary-card">
-          <h3>Total Products</h3>
-          <div className="summary-value">{products.length}</div>
-        </div>
-        <div className="card summary-card">
-          <h3>Pending Pricing</h3>
-          <div className="summary-value" style={{ color: '#3498db' }}>{pricingSuggestions.length}</div>
-        </div>
-        <div className="card summary-card">
-          <h3>Pending Reorder</h3>
-          <div className="summary-value" style={{ color: '#27ae60' }}>{reorderSuggestions.length}</div>
-        </div>
-        <div className="card summary-card">
-          <h3>Low Stock Items</h3>
-          <div className="summary-value" style={{ color: '#e74c3c' }}>
-            {products.filter(p => p.stockLevel < p.reorderThreshold).length}
+      {/* KPI Metrics Strip */}
+      <div className="kpi-grid">
+        <div className="kpi-card accent-cyan">
+          <div className="kpi-header">
+            <span className="kpi-title">Catalog Health</span>
+            <span style={{ fontSize: '18px' }}>📦</span>
           </div>
+          <div className="kpi-stat">{totalSkus} <span style={{ fontSize: '14px', color: 'var(--text-muted)' }}>SKUs</span></div>
+          <div className="kpi-sub">Across Electronics, Apparel & Home</div>
+        </div>
+
+        <div className="kpi-card accent-coral">
+          <div className="kpi-header">
+            <span className="kpi-title">Stock Breaches</span>
+            <span style={{ fontSize: '18px' }}>⚠️</span>
+          </div>
+          <div className="kpi-stat" style={{ color: lowStockCount > 0 ? 'var(--coral)' : 'var(--text-primary)' }}>
+            {lowStockCount}
+          </div>
+          <div className="kpi-sub">Items below reorder threshold</div>
+        </div>
+
+        <div className="kpi-card accent-amber">
+          <div className="kpi-header">
+            <span className="kpi-title">Pricing Proposals</span>
+            <span style={{ fontSize: '18px' }}>📈</span>
+          </div>
+          <div className="kpi-stat" style={{ color: 'var(--amber)' }}>{pendingPricingCount}</div>
+          <div className="kpi-sub">Pending human review & publishing</div>
+        </div>
+
+        <div className="kpi-card accent-emerald">
+          <div className="kpi-header">
+            <span className="kpi-title">Replenishment POs</span>
+            <span style={{ fontSize: '18px' }}>🔄</span>
+          </div>
+          <div className="kpi-stat" style={{ color: 'var(--emerald)' }}>{pendingReorderCount}</div>
+          <div className="kpi-sub">{totalUnitsToReorder} total units to reorder</div>
         </div>
       </div>
 
-      {/* Products Table */}
-      <div className="section">
-        <h2>Inventory Overview</h2>
-        <div className="card">
-          <table className="products-table">
+      {/* AI Decision Hub (Pricing & Reorder Queues) */}
+      <div className="hub-section">
+        <div className="hub-header">
+          <div className="hub-title">
+            Autonomous Decision Hub
+            <span className="count-chip">{pricingSuggestions.length + reorderSuggestions.length} Total Actions Required</span>
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button 
+              className={`pill-btn ${activeTab === 'pricing' ? 'active' : ''}`}
+              onClick={() => setActiveTab('pricing')}
+            >
+              Dynamic Pricing ({pricingSuggestions.length})
+            </button>
+            <button 
+              className={`pill-btn ${activeTab === 'reorder' ? 'active' : ''}`}
+              onClick={() => setActiveTab('reorder')}
+            >
+              Replenishment POs ({reorderSuggestions.length})
+            </button>
+          </div>
+        </div>
+
+        {/* Dynamic Pricing Tab */}
+        {activeTab === 'pricing' && (
+          <div>
+            {pricingSuggestions.length === 0 ? (
+              <div className="empty-hero">
+                <div className="empty-icon">✓</div>
+                <div className="empty-text">
+                  All prices are calibrated. Simulate a sale on any product below to trigger the inventory depletion loop!
+                </div>
+              </div>
+            ) : (
+              <div className="cards-grid">
+                {pricingSuggestions.map(s => {
+                  const diff = s.recommendedPrice - s.currentPrice
+                  const pct = ((diff / s.currentPrice) * 100).toFixed(1)
+                  return (
+                    <div key={s.id} className="decision-card">
+                      <div className="card-top">
+                        <span className="sku-badge">{s.productSku}</span>
+                        <span className={`trigger-badge ${s.triggerReason === 'INVENTORY_LOW' ? 'low-stock' : s.triggerReason === 'DEMAND_SPIKE' ? 'demand-spike' : 'manual'}`}>
+                          {s.triggerReason.replace('_', ' ')}
+                        </span>
+                      </div>
+
+                      <div className="card-product-name">{s.productName}</div>
+
+                      <div className="recommend-box">
+                        <div className="price-flow">
+                          <span className="old-price">${s.currentPrice.toFixed(2)}</span>
+                          <span className="new-price">${s.recommendedPrice.toFixed(2)}</span>
+                        </div>
+                        <span className={`percent-chip ${diff > 0 ? 'up' : diff < 0 ? 'down' : 'hold'}`}>
+                          {diff > 0 ? `▲ +${pct}%` : `${pct}%`}
+                        </span>
+                      </div>
+
+                      <div className="meter-section">
+                        <div className="meter-labels">
+                          <span>AI Decision Confidence</span>
+                          <span>{Math.round(s.confidence * 100)}%</span>
+                        </div>
+                        <div className="meter-track">
+                          <div className="meter-fill" style={{ width: `${s.confidence * 100}%` }}></div>
+                        </div>
+                      </div>
+
+                      <div className="ai-reasoning">
+                        "{s.reasoning}"
+                      </div>
+
+                      <div className="card-btns">
+                        <button className="btn-decline" onClick={() => handleRejectPricing(s)}>
+                          Reject
+                        </button>
+                        <button className="btn-approve" onClick={() => handleAcceptPricing(s)}>
+                          Publish Price →
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Replenishment Tab */}
+        {activeTab === 'reorder' && (
+          <div>
+            {reorderSuggestions.length === 0 ? (
+              <div className="empty-hero">
+                <div className="empty-icon">✓</div>
+                <div className="empty-text">
+                  Inventory buffers healthy. Lower a stock level below reorder threshold to trigger automatic replenishment suggestions.
+                </div>
+              </div>
+            ) : (
+              <div className="cards-grid">
+                {reorderSuggestions.map(s => (
+                  <div key={s.id} className="decision-card reorder-card">
+                    <div className="card-top">
+                      <span className="sku-badge">{s.productSku}</span>
+                      <span className={`trigger-badge ${s.triggerReason === 'INVENTORY_LOW' ? 'low-stock' : s.triggerReason === 'DEMAND_SPIKE' ? 'demand-spike' : 'manual'}`}>
+                        {s.triggerReason.replace('_', ' ')}
+                      </span>
+                    </div>
+
+                    <div className="card-product-name">{s.productName}</div>
+
+                    <div className="recommend-box">
+                      <div>
+                        <span style={{ fontSize: '10px', color: 'var(--text-muted)', display: 'block', textTransform: 'uppercase' }}>Current Stock</span>
+                        <span style={{ fontSize: '18px', fontWeight: 600, color: 'var(--coral)' }}>{s.currentStock} units</span>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <span style={{ fontSize: '10px', color: 'var(--cyan)', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Suggested PO</span>
+                        <span style={{ fontSize: '20px', fontWeight: 700, color: 'var(--cyan)' }}>+{s.recommendedQuantity} units</span>
+                      </div>
+                    </div>
+
+                    <div className="meter-section">
+                      <div className="meter-labels">
+                        <span>Lead Time: {s.suggestedLeadTime} days</span>
+                        <span>Confidence: {Math.round(s.confidence * 100)}%</span>
+                      </div>
+                      <div className="meter-track">
+                        <div className="meter-fill reorder" style={{ width: `${s.confidence * 100}%` }}></div>
+                      </div>
+                    </div>
+
+                    <div className="ai-reasoning reorder">
+                      "{s.reasoning}"
+                    </div>
+
+                    <div className="card-btns">
+                      <button className="btn-decline" onClick={() => handleRejectReorder(s)}>
+                        Reject
+                      </button>
+                      <button className="btn-approve" onClick={() => handleAcceptReorder(s)}>
+                        Approve Inbound →
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Storefront Catalog & Simulator Table */}
+      <div className="catalog-section">
+        <div className="hub-header">
+          <div className="hub-title">
+            Storefront Catalog & Reactive Simulator
+          </div>
+
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+            <input 
+              type="text"
+              placeholder="Search SKU or product..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{
+                background: 'var(--bg-surface-elevated)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '8px',
+                padding: '6px 14px',
+                color: '#fff',
+                fontSize: '12px',
+                fontFamily: 'var(--font-mono)',
+                width: '200px'
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Filter Pills */}
+        <div className="filter-bar">
+          <div className="filter-pills">
+            {['ALL', 'ELECTRONICS', 'APPAREL', 'HOME'].map(cat => (
+              <button 
+                key={cat}
+                className={`pill-btn ${categoryFilter === cat ? 'active' : ''}`}
+                onClick={() => setCategoryFilter(cat)}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+
+          <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+            Showing {filteredProducts.length} of {products.length} catalog items
+          </span>
+        </div>
+
+        {/* Table */}
+        <div className="table-wrapper">
+          <table className="catalog-tbl">
             <thead>
               <tr>
                 <th>SKU</th>
-                <th>Name</th>
+                <th>Product Description</th>
                 <th>Category</th>
                 <th>Price</th>
-                <th>Stock</th>
-                <th>Threshold</th>
-                <th>Velocity</th>
-                <th>Status</th>
-                <th>Actions</th>
+                <th>Stock / Threshold</th>
+                <th>24h Velocity</th>
+                <th>Lifecycle Status</th>
+                <th style={{ textAlign: 'right' }}>Interactive Simulation</th>
               </tr>
             </thead>
             <tbody>
-              {products.map(product => (
-                <tr key={product.id}>
-                  <td>{product.sku}</td>
-                  <td>{product.name}</td>
-                  <td>{product.category}</td>
-                  <td>${product.currentPrice.toFixed(2)}</td>
-                  <td>
-                    <span className={product.stockLevel < product.reorderThreshold ? 'low-stock' : ''}>
-                      {product.stockLevel}
-                    </span>
-                    {product.stockLevel < product.reorderThreshold && (
-                      <span className="low-stock-indicator"> ⚠️</span>
-                    )}
-                  </td>
-                  <td>{product.reorderThreshold}</td>
-                  <td>{product.demandVelocity}</td>
-                  <td>
-                    <span className={`status-badge ${product.status.toLowerCase().replace(/ /g, '_')}`}>
-                      {product.status.replace(/_/g, ' ')}
-                    </span>
-                  </td>
-                  <td>
-                    <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
-                      <button 
-                        onClick={() => handleSimulateSale(product.id)}
-                        className="btn-secondary"
-                        disabled={product.stockLevel <= 0}
-                      >
-                        Sale
-                      </button>
-                      <input
-                        type="number"
-                        defaultValue={product.stockLevel}
-                        onBlur={(e) => handleUpdateStock(product.id, e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            handleUpdateStock(product.id, e.target.value)
-                            e.target.blur()
-                          }
-                        }}
-                        style={{ width: '80px' }}
-                        min="0"
-                      />
-                    </div>
-                    {product.demandVelocity < 10 && (
-                      <button 
-                        onClick={() => handleSimulateDemandSpike(product.id)}
-                        className="btn-warning"
-                        style={{ marginTop: '5px', fontSize: '12px', padding: '4px 8px' }}
-                        disabled={product.stockLevel < 5}
-                      >
-                        Demand Spike
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {filteredProducts.map(p => {
+                const isBreached = p.stockLevel <= p.reorderThreshold
+                const stockPct = Math.min(100, Math.round((p.stockLevel / (p.reorderThreshold * 2.5)) * 100))
+                return (
+                  <tr key={p.id}>
+                    <td>
+                      <span className="sku-badge">{p.sku}</span>
+                    </td>
+                    <td>
+                      <strong style={{ color: '#fff' }}>{p.name}</strong>
+                    </td>
+                    <td>
+                      <span style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '11px' }}>
+                        {p.category}
+                      </span>
+                    </td>
+                    <td>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--emerald)' }}>
+                        ${p.currentPrice.toFixed(2)}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="stock-meter">
+                        <div className={`stock-num ${isBreached ? 'warn' : 'safe'}`}>
+                          <span>{p.stockLevel}</span>
+                          <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '11px' }}>/ {p.reorderThreshold}</span>
+                          {isBreached && <span title="Breached reorder threshold">⚠️</span>}
+                        </div>
+                        <div className="stock-track">
+                          <div 
+                            className={`stock-bar ${isBreached ? 'low' : ''}`}
+                            style={{ width: `${stockPct}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: p.demandVelocity >= 10 ? 'var(--purple)' : 'var(--text-secondary)' }}>
+                        ⚡ {p.demandVelocity} / day
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`status-tag ${p.status.toLowerCase()}`}>
+                        {p.status.replace(/_/g, ' ')}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="action-cluster">
+                        {/* Sale Simulator */}
+                        <button 
+                          className="btn-tool sale"
+                          onClick={() => handleSimulateSale(p)}
+                          disabled={p.stockLevel <= 0}
+                          title="Simulate 1 purchase (stock -1, velocity +1)"
+                        >
+                          + Sale
+                        </button>
+
+                        {/* Inline Stock Edit */}
+                        <input 
+                          type="number"
+                          className="stock-stepper"
+                          defaultValue={p.stockLevel}
+                          key={`${p.id}-${p.stockLevel}`}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              handleUpdateStock(p, e.target.value)
+                              e.target.blur()
+                            }
+                          }}
+                          onBlur={(e) => handleUpdateStock(p, e.target.value)}
+                          title="Enter new stock and press Enter"
+                        />
+
+                        {/* Demand Surge Simulator */}
+                        <button 
+                          className="btn-tool surge"
+                          onClick={() => handleSimulateSurge(p)}
+                          title="Simulate viral demand spike (4 rapid orders)"
+                        >
+                          ⚡ Surge
+                        </button>
+
+                        {/* On-Demand AI Pricing */}
+                        <button 
+                          className="btn-tool"
+                          style={{ background: 'rgba(99, 102, 241, 0.12)', border: '1px solid rgba(99, 102, 241, 0.3)', color: '#c7d2fe' }}
+                          onClick={() => handleTriggerPricing(p)}
+                          title="Generate AI pricing proposal for this SKU"
+                        >
+                          ✦ AI Price
+                        </button>
+
+                        {/* On-Demand AI Reorder */}
+                        <button 
+                          className="btn-tool"
+                          style={{ background: 'rgba(6, 182, 212, 0.12)', border: '1px solid rgba(6, 182, 212, 0.3)', color: '#67e8f9' }}
+                          onClick={() => handleTriggerReorder(p)}
+                          title="Generate AI replenishment proposal for this SKU"
+                        >
+                          ✦ AI PO
+                        </button>
+
+                        {/* SSE Stream Button */}
+                        <button 
+                          className="btn-tool stream"
+                          onClick={() => handleStartSseStream(p)}
+                          title="Stream live AI reasoning tokens in real time"
+                        >
+                          ✦ Stream
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* Pricing Suggestions */}
-      <div className="section">
-        <h2>Pricing Recommendations</h2>
-        {pricingSuggestions.length === 0 ? (
-          <div className="card empty-state">
-            <p>No pending pricing suggestions</p>
-          </div>
-        ) : (
-          <div className="suggestions-grid">
-            {pricingSuggestions.map(suggestion => (
-              <div key={suggestion.id} className="card suggestion-card">
-                <div className="suggestion-header">
-                  <h3>{suggestion.productName}</h3>
-                  <span className="sku">{suggestion.productSku}</span>
-                </div>
-                <div className="suggestion-details">
-                  <div className="price-info">
-                    <div>
-                      <label>Current Price:</label>
-                      <span className="current-price">${suggestion.currentPrice.toFixed(2)}</span>
-                    </div>
-                    <div>
-                      <label>Recommended Price:</label>
-                      <span className={`recommended-price ${suggestion.changeDirection.toLowerCase()}`}>
-                        ${suggestion.recommendedPrice.toFixed(2)}
-                      </span>
-                      <span className={`direction-badge ${suggestion.changeDirection.toLowerCase()}`} style={{ marginLeft: '8px' }}>
-                        {suggestion.changeDirection}
-                      </span>
-                    </div>
-                    <div>
-                      <label>Change Amount:</label>
-                      <span className={suggestion.recommendedPrice > suggestion.currentPrice ? 'increase' : suggestion.recommendedPrice < suggestion.currentPrice ? 'decrease' : 'hold'}>
-                        {suggestion.recommendedPrice > suggestion.currentPrice ? '+' : ''}
-                        {((suggestion.recommendedPrice - suggestion.currentPrice) / suggestion.currentPrice * 100).toFixed(1)}%
-                      </span>
-                    </div>
-                  </div>
-                  <div className="confidence-bar">
-                    <label>Confidence: {(suggestion.confidence * 100).toFixed(0)}%</label>
-                    <div className="progress-bar">
-                      <div 
-                        className="progress-fill" 
-                        style={{ width: `${suggestion.confidence * 100}%` }}
-                      ></div>
-                    </div>
-                  </div>
-                  <div className="reasoning">
-                    <label>Reasoning:</label>
-                    <p>{suggestion.reasoning}</p>
-                  </div>
-                  <div className="trigger-badge">
-                    Trigger: {suggestion.triggerReason.replace('_', ' ')}
-                  </div>
-                </div>
-                <div className="suggestion-actions">
-                  <button 
-                    onClick={() => handleAcceptSuggestion('pricing', suggestion.id)}
-                    className="btn-primary"
-                  >
-                    Accept
-                  </button>
-                  <button 
-                    onClick={() => handleRejectSuggestion('pricing', suggestion.id)}
-                    className="btn-danger"
-                  >
-                    Reject
-                  </button>
-                </div>
+      {/* Real-Time SSE Neural Stream Modal */}
+      {streamingProduct && (
+        <div className="terminal-backdrop" onClick={handleCloseStream}>
+          <div className="terminal-window" onClick={(e) => e.stopPropagation()}>
+            <div className="terminal-bar">
+              <div className="window-dots">
+                <span className="dot red"></span>
+                <span className="dot yellow"></span>
+                <span className="dot green"></span>
               </div>
-            ))}
-          </div>
-        )}
-      {/* Reorder Suggestions */}
-      <div className="section">
-        <h2>Reorder Recommendations</h2>
-        {reorderSuggestions.length === 0 ? (
-          <div className="card empty-state">
-            <p>No pending reorder suggestions</p>
-          </div>
-        ) : (
-          <div className="suggestions-grid">
-            {reorderSuggestions.map(suggestion => (
-              <div key={suggestion.id} className="card suggestion-card">
-                <div className="suggestion-header">
-                  <h3>{suggestion.productName}</h3>
-                  <span className="sku">{suggestion.productSku}</span>
-                </div>
-                <div className="suggestion-details">
-                  <div className="reorder-info">
-                    <div>
-                      <label>Current Stock:</label>
-                      <span className="current-stock">{suggestion.currentStock}</span>
-                    </div>
-                    <div>
-                      <label>Recommended Quantity:</label>
-                      <span className="recommended-quantity">{suggestion.recommendedQuantity}</span>
-                    </div>
-                    <div>
-                      <label>Suggested Lead Time:</label>
-                      <span>{suggestion.suggestedLeadTime} days</span>
-                    </div>
-                  </div>
-                  <div className="confidence-bar">
-                    <label>Confidence: {(suggestion.confidence * 100).toFixed(0)}%</label>
-                    <div className="progress-bar">
-                      <div 
-                        className="progress-fill" 
-                        style={{ width: `${suggestion.confidence * 100}%` }}
-                      ></div>
-                    </div>
-                  </div>
-                  <div className="reasoning">
-                    <label>Reasoning:</label>
-                    <p>{suggestion.reasoning}</p>
-                  </div>
-                  <div className="trigger-badge">
-                    Trigger: {suggestion.triggerReason.replace('_', ' ')}
-                  </div>
-                </div>
-                <div className="suggestion-actions">
-                  <button 
-                    onClick={() => handleAcceptSuggestion('reorder', suggestion.id)}
-                    className="btn-primary"
-                  >
-                    Accept
-                  </button>
-                  <button 
-                    onClick={() => handleRejectSuggestion('reorder', suggestion.id)}
-                    className="btn-danger"
-                  >
-                    Reject
-                  </button>
-                </div>
+              <div className="terminal-title">
+                <span>✦</span> SSE REAL-TIME NEURAL STREAM · {streamingProduct.sku}
               </div>
-            ))}
+              <button 
+                onClick={handleCloseStream}
+                style={{ background: 'none', border: 'none', color: '#64748b', fontSize: '18px', cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="terminal-body">
+              {streamLogs.map((log, i) => (
+                <div key={i} className={`stream-row ${log.type}`}>
+                  <span style={{ color: '#6366f1' }}>&gt;</span> {log.text}
+                </div>
+              ))}
+              {isStreaming && (
+                <div className="stream-row">
+                  <span style={{ color: '#6366f1' }}>&gt;</span>
+                  <span style={{ color: '#64748b' }}>Synthesizing dynamic strategy tokens</span>
+                  <span className="cursor"></span>
+                </div>
+              )}
+            </div>
+
+            <div style={{ padding: '12px 20px', borderTop: '1px solid rgba(255,255,255,0.08)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#0d1322' }}>
+              <span style={{ fontSize: '11px', color: '#64748b', fontFamily: 'var(--font-mono)' }}>
+                Target: {streamingProduct.name} (${streamingProduct.currentPrice.toFixed(2)})
+              </span>
+              <button 
+                className="btn-tool" 
+                style={{ background: 'var(--primary)', color: '#fff', border: 'none' }}
+                onClick={handleCloseStream}
+              >
+                Close Stream
+              </button>
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }
